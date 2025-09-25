@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{% for name, data in collectors.items() %}
+<div class="collector-block">
+    <div class="collector-title">{{ name }}</div>
+    <ul class="objects-list">
+        {% for obj in data.objects %}
+        <li>
+            <label style="color:white">
+                <input type="checkbox" name="{{ name }}_object" value="{{ obj }}">
+                {{ obj }}
+            </label>
+        </li>
+        {% else %}
+        <li style="color:#888;">Нет объектов</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endfor %}
+
+{% endblock %}

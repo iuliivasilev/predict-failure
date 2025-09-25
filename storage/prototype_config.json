@@ -1,0 +1,11 @@
+{
+  "enabled_collectors": ["cpu", "smart"],
+  "collectors": {
+    "cpu": { "interval": 5, "threshold": 90 },
+    "smart": { "interval": 60, "devices": ["sda", "sdb"] }
+  },
+  "models": {
+    "default": "rsf",
+    "rsf": { "n_estimators": 100 }
+  }
+}
