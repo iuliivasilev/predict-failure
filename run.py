@@ -16,6 +16,7 @@ def main():
     # return render_template('index.html', header={})
     result = manager.find_objects()
     print(result)
+    data = manager.collect_data('cpu')
     return render_template('index.html', collectors=result)
 
 @app.route('/find_objects')

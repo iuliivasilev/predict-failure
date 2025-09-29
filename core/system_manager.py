@@ -43,9 +43,9 @@ class SystemManager:
 
     # --- Работа с данными ---
     def collect_data(self, collector_name: str, objects=None):
-        collector = self.collectors[collector_name]()
-        objects = objects or collector.discover_objects()
-        self.data = collector.collect(objects)
+        collector = self.collectors[collector_name]
+        # objects = objects or collector.discover_objects()
+        self.data = collector.collect()
         return self.data
 
     # --- Работа с моделями ---
