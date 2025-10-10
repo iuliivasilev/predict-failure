@@ -11,19 +11,24 @@ class AbstractCPUDataCollector(AbstractDataCollector):
     """Базовый класс для всех CPU сборщиков"""
     def __init__(self, config=None):
         self.update_config(config or {})
-        self._prev_cpu_times = None  # Для расчета точного использования CPU
 
     def update_config(self, config):
         self.interval = config.get("interval", 1)  # сек между замерами
 
     def collect(self, objects=None) -> pd.DataFrame:
-        """Собрать метрики CPU"""
         timestamp = time.time()
-
         load1, load5, load15 = self._get_loadavg()
         usage = self._get_cpu_usage()
+        idle = self._get_cpu_idle()
         freq = self._get_cpu_freq()
+        freq_min, freq_max = self._get_cpu_freq_min_max()
         uptime = self._get_uptime()
+        temp = self._get_cpu_temp()
+        interrupts = self._get_interrupts()
+        cpu_info = self._get_cpu_info()
+        cores = len(self.find_objects())
+        load_1m_per_core = load1 / cores if cores else None
+
         processes = self._get_process_count()
         cpu_temp = self._get_cpu_temperature()
         context_switches = self._get_context_switches()
@@ -31,19 +36,28 @@ class AbstractCPUDataCollector(AbstractDataCollector):
         data = {
             "timestamp": [timestamp],
             "cpu_usage_percent": [usage],
-            "cpu_frequency_ghz": [freq],
+            "cpu_idle_percent": [idle],
+            "cpu_freq_current_ghz": [freq],
+            "cpu_freq_min_ghz": [freq_min],
+            "cpu_freq_max_ghz": [freq_max],
             "load_1m": [load1],
             "load_5m": [load5],
             "load_15m": [load15],
+            "load_1m_per_core": [load_1m_per_core],
             "uptime_sec": [uptime],
-            "cores": [len(self.find_objects())],
+            "cores": [cores],
+            "physical_cores": [cpu_info.get('physical_cores')],
+            "cpu_model": [cpu_info.get('model')],
+            "cpu_vendor": [cpu_info.get('vendor')],
+            "cache_size": [cpu_info.get('cache_size')],
+            "cpu_temp_celsius": [temp],
+            "total_interrupts": [interrupts],
             "processes_total": [processes],
             "cpu_temperature_c": [cpu_temp],
             "context_switches": [context_switches],
         }
         print("Собранные данные:", data)
         return pd.DataFrame(data)
-
 
 class CpuCollectorMacOS(AbstractCPUDataCollector):
     def find_objects(self):
@@ -59,40 +73,26 @@ class CpuCollectorMacOS(AbstractCPUDataCollector):
         return os.getloadavg()
 
     def _get_cpu_usage(self):
-        """Более точное использование CPU через sysctl"""
+        """
+        Используем `ps -A -o %cpu` для замера загрузки CPU (в процентах).
+        Это грубая оценка, но без сторонних библиотек иначе сложно.
+        """
         try:
-            # Получаем статистику использования CPU
-            cmd = ["sysctl", "-n", "kern.cp_time"]
-            output = subprocess.check_output(cmd).decode().strip()
-            cpu_times = list(map(int, output.split()))
-            
-            # user, nice, system, idle, (other times vary by system)
-            total_time = sum(cpu_times)
-            idle_time = cpu_times[3]  # idle time
-            
-            if self._prev_cpu_times is not None:
-                prev_total, prev_idle = self._prev_cpu_times
-                total_diff = total_time - prev_total
-                idle_diff = idle_time - prev_idle
-                
-                if total_diff > 0:
-                    usage_percent = 100.0 * (total_diff - idle_diff) / total_diff
-                else:
-                    usage_percent = 0.0
-            else:
-                usage_percent = 0.0
-            
-            self._prev_cpu_times = (total_time, idle_time)
-            return usage_percent
-            
+            output = subprocess.check_output(["ps", "-A", "-o", "%cpu"]).decode().strip().split("\n")[1:]
+            cpu_usages = [float(x) for x in output if x.strip()]
+            return sum(cpu_usages) / os.cpu_count()
         except Exception:
-            # Fallback на ps метод
-            try:
-                output = subprocess.check_output(["ps", "-A", "-o", "%cpu"]).decode().strip().split("\n")[1:]
-                cpu_usages = [float(x) for x in output if x.strip()]
-                return sum(cpu_usages) / os.cpu_count()
-            except Exception:
-                return None
+            return None
+
+    def _get_cpu_idle(self):
+        try:
+            output = subprocess.check_output(["sar", "-u", "1", "1"]).decode()
+            for line in output.splitlines():
+                if "Average" in line:
+                    parts = line.split()
+                    return float(parts[-1])  # %idle
+        except Exception:
+            return None
 
     def _get_cpu_freq(self):
         """Частота CPU в ГГц (номинальная и текущая)"""
@@ -104,14 +104,42 @@ class CpuCollectorMacOS(AbstractCPUDataCollector):
         except Exception:
             return None
 
+    def _get_cpu_freq_min_max(self):
+        # macOS не предоставляет min/max через sysctl, возвращаем None
+        return None, None
+
     def _get_uptime(self):
         try:
-            uptime_sec = float(subprocess.check_output(["sysctl", "-n", "kern.boottime"]).decode().split("sec")[0].split("=")[1])
-            now = time.time()
-            return now - uptime_sec
+            boottime = subprocess.check_output(["sysctl", "-n", "kern.boottime"]).decode()
+            sec = int(boottime.split("sec =")[1].split(",")[0].strip())
+            now = int(time.time())
+            return now - sec
         except Exception:
             return None
 
+    def _get_cpu_temp(self):
+        # Нет стандартного способа без сторонних утилит, возвращаем None
+        return None
+
+    def _get_interrupts(self):
+        # Нет стандартного способа без сторонних утилит, возвращаем None
+        return None
+
+    def _get_cpu_info(self):
+        try:
+            model = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"]).decode().strip()
+            vendor = subprocess.check_output(["sysctl", "-n", "machdep.cpu.vendor"]).decode().strip()
+            physical_cores = int(subprocess.check_output(["sysctl", "-n", "hw.physicalcpu"]).decode().strip())
+            cache_size = int(subprocess.check_output(["sysctl", "-n", "hw.l3cachesize"]).decode().strip()) // 1024
+            return {
+                "model": model,
+                "vendor": vendor,
+                "physical_cores": physical_cores,
+                "cache_size": f"{cache_size} KB"
+            }
+        except Exception:
+            return {}
+        
     def _get_process_count(self):
         """Количество запущенных процессов"""
         try:
@@ -145,8 +173,7 @@ class CpuCollectorMacOS(AbstractCPUDataCollector):
             pass
         return None
 
-
-class CpuCollectorLinux(AbstractCPUDataCollector):
+class CpuCollectorLinux(AbstractCPUDataCollector):        
     def find_objects(self):
         """На Linux объекты = логические CPU"""
         try:
@@ -165,47 +192,35 @@ class CpuCollectorLinux(AbstractCPUDataCollector):
             return 0.0, 0.0, 0.0
 
     def _get_cpu_usage(self):
-        """Точное использование CPU через /proc/stat"""
+        """Использование CPU в процентах через ps"""
+        try:
+            output = subprocess.check_output(["ps", "-A", "-o", "%cpu"]).decode().strip().split("\n")[1:]
+            cpu_usages = [float(x) for x in output if x.strip()]
+            return sum(cpu_usages) / len(self.find_objects())
+        except Exception:
+            return None
+        
+    def _get_cpu_idle(self):
         try:
             with open('/proc/stat', 'r') as f:
-                lines = f.readlines()
-            
-            for line in lines:
-                if line.startswith('cpu '):  # Общая статистика CPU
-                    parts = line.split()
-                    user = int(parts[1])
-                    nice = int(parts[2])
-                    system = int(parts[3])
-                    idle = int(parts[4])
-                    iowait = int(parts[5])
-                    
-                    total_time = user + nice + system + idle + iowait
-                    non_idle_time = user + nice + system
-                    
-                    if self._prev_cpu_times is not None:
-                        prev_total, prev_non_idle = self._prev_cpu_times
-                        total_diff = total_time - prev_total
-                        non_idle_diff = non_idle_time - prev_non_idle
-                        
-                        if total_diff > 0:
-                            usage_percent = 100.0 * non_idle_diff / total_diff
-                        else:
-                            usage_percent = 0.0
-                    else:
-                        usage_percent = 0.0
-                    
-                    self._prev_cpu_times = (total_time, non_idle_time)
-                    return usage_percent
-                    
-        except Exception:
-            # Fallback на ps метод
-            try:
-                output = subprocess.check_output(["ps", "-A", "-o", "%cpu"]).decode().strip().split("\n")[1:]
-                cpu_usages = [float(x) for x in output if x.strip()]
-                return sum(cpu_usages) / len(self.find_objects())
-            except Exception:
+                line = f.readline()
+            parts = line.split()
+            total = sum(map(int, parts[1:]))
+            idle = int(parts[4])
+            if not hasattr(self, '_prev_total_idle'):
+                self._prev_total_idle = total
+                self._prev_idle_idle = idle
                 return None
-        return None
+            total_diff = total - self._prev_total_idle
+            idle_diff = idle - self._prev_idle_idle
+            self._prev_total_idle = total
+            self._prev_idle_idle = idle
+            if total_diff == 0:
+                return None
+            idle_percent = (idle_diff / total_diff) * 100
+            return idle_percent
+        except Exception:
+            return None
 
     def _get_cpu_freq(self):
         """Средняя частота CPU в ГГц"""
@@ -213,31 +228,33 @@ class CpuCollectorLinux(AbstractCPUDataCollector):
             # Пробуем получить текущую частоту из /proc/cpuinfo
             with open('/proc/cpuinfo', 'r') as f:
                 lines = f.readlines()
-            
-            frequencies = []
-            for line in lines:
-                if 'cpu mhz' in line.lower():
-                    freq_mhz = float(line.split(':')[1].strip())
-                    frequencies.append(freq_mhz)
-            
+            frequencies = [float(line.split(':')[1].strip()) for line in lines if 'cpu mhz' in line.lower()]
             if frequencies:
-                avg_freq_ghz = sum(frequencies) / len(frequencies) / 1000
-                return avg_freq_ghz
-            
-            # Альтернативный метод
-            try:
-                output = subprocess.check_output(["lscpu"]).decode()
-                for line in output.split('\n'):
-                    if 'CPU MHz:' in line:
-                        freq_mhz = float(line.split(':')[1].strip())
-                        return freq_mhz / 1000
-            except:
-                pass
-                
+                return sum(frequencies) / len(frequencies) / 1000
             return None
         except Exception:
             return None
 
+    def _get_cpu_freq_min_max(self):
+        try:
+            cur, minf, maxf = [], [], []
+            for cpu in self.find_objects():
+                num = cpu.replace('cpu', '')
+                try:
+                    with open(f'/sys/devices/system/cpu/cpu{num}/cpufreq/scaling_cur_freq') as f:
+                        cur.append(int(f.read().strip()) / 1e6)
+                    with open(f'/sys/devices/system/cpu/cpu{num}/cpufreq/scaling_min_freq') as f:
+                        minf.append(int(f.read().strip()) / 1e6)
+                    with open(f'/sys/devices/system/cpu/cpu{num}/cpufreq/scaling_max_freq') as f:
+                        maxf.append(int(f.read().strip()) / 1e6)
+                except Exception:
+                    continue
+            if cur and minf and maxf:
+                return sum(minf)/len(minf), sum(maxf)/len(maxf)
+            return None, None
+        except Exception:
+            return None, None
+    
     def _get_uptime(self):
         """Время работы системы"""
         try:
@@ -246,7 +263,61 @@ class CpuCollectorLinux(AbstractCPUDataCollector):
             return uptime_seconds
         except Exception:
             return None
+    
+    def _get_cpu_temp(self):
+        try:
+            for zone in os.listdir('/sys/class/thermal'):
+                if zone.startswith('thermal_zone'):
+                    try:
+                        with open(f'/sys/class/thermal/{zone}/type') as f:
+                            if 'cpu' in f.read().lower():
+                                with open(f'/sys/class/thermal/{zone}/temp') as tf:
+                                    return int(tf.read().strip()) / 1000.0
+                    except Exception:
+                        continue
+            return None
+        except Exception:
+            return None
 
+    def _get_interrupts(self):
+        try:
+            with open('/proc/interrupts', 'r') as f:
+                lines = f.readlines()
+            total = 0
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) > 1:
+                    total += int(parts[1])
+            return total
+        except Exception:
+            return None
+
+    def _get_cpu_info(self):
+        try:
+            info = {}
+            with open('/proc/cpuinfo', 'r') as f:
+                lines = f.readlines()
+            cpu0_info = {}
+            for line in lines:
+                if line.strip() == '':
+                    break
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    cpu0_info[key.strip()] = value.strip()
+            info['model'] = cpu0_info.get('model name', 'Unknown')
+            info['vendor'] = cpu0_info.get('vendor_id', 'Unknown')
+            info['cache_size'] = cpu0_info.get('cache size', 'Unknown')
+            # Физические ядра
+            physical_cores = 0
+            for line in lines:
+                if line.startswith('cpu cores'):
+                    physical_cores = int(line.split(':')[1].strip())
+                    break
+            info['physical_cores'] = physical_cores
+            return info
+        except Exception:
+            return {}
+    
     def _get_process_count(self):
         """Количество запущенных процессов"""
         try:

@@ -8,3 +8,7 @@
 - load_15m - Load average за 15 минут
 - uptime_sec - Время работы системы в секундах
 - cores - Количество логических ядер CPU
+- cpu_temp_celsius - Время простоя (idle)
+- total_interrupts - Количество прерываний
+- cpu_model, cpu_vendor, physical_cores, cache_size - Информация о процессоре
+- load_1m_per_core - Среднее время отклика (load average на ядро)
