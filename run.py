@@ -24,6 +24,18 @@ def find_objects():
     result = manager.find_objects()
     return render_template('index.html', collectors=result)
 
+@app.route('/system_status')
+def system_status():
+    status = {}
+    for name, collector in manager.collectors.items():
+        try:
+            df = collector.collect()
+            if not df.empty:
+                status[name] = df.iloc[0].to_dict()
+        except Exception as e:
+            status[name] = {"error": str(e)}
+    return render_template('system_status.html', status=status)
+
 
 if __name__ == '__main__':
     app.run(debug=True, threaded=False, host='0.0.0.0', port=11111)
