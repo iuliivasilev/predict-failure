@@ -39,3 +39,19 @@ body {
 input[type="checkbox"] {
     accent-color: #7ecfff;
 }
+
+.monitor-form {
+    margin: 2rem auto 1rem auto;
+    text-align: center;
+}
+.chart-container {
+    width: 90vw;
+    max-width: 900px;
+    margin: 0 auto;
+    background: #232323;
+    border-radius: 12px;
+    padding: 2rem;
+}
+label, select {
+    font-size: 1.1rem;
+}
