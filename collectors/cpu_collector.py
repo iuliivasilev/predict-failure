@@ -60,11 +60,17 @@ class AbstractCPUDataCollector(AbstractDataCollector):
             "context_switches": [context_switches],
         }
         df = pd.DataFrame(data)
-        # Сохраняем в CSV (append, без заголовка если файл уже есть)
+        # Сохраняем в CSV (append)
         write_header = not os.path.exists(self._csv_path) or os.path.getsize(self._csv_path) == 0
         df.to_csv(self._csv_path, mode='a', header=write_header, index=False)
         print("Собранные данные:", data)
         return df
+    
+    def get_history(self):
+        """Загрузить исторические данные этого collector из его CSV"""
+        if os.path.exists(self._csv_path):
+            return pd.read_csv(self._csv_path)
+        return pd.DataFrame()
 
 class CpuCollectorMacOS(AbstractCPUDataCollector):
     def find_objects(self):
