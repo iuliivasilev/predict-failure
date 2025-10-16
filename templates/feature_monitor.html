@@ -21,37 +21,8 @@
     <canvas id="featureChart"></canvas>
 </div>
 <script>
-    const chartData = {{chart_data|tojson}};
-    if (chartData) {
-        const ctx = document.getElementById('featureChart').getContext('2d');
-        const data = {
-            labels: chartData.timestamps.map(ts => {
-                const d = new Date(ts * 1000);
-                return d.toLocaleString();
-            }),
-            datasets: [{
-                label: '{{ selected_feature }}',
-                data: chartData.values,
-                borderColor: '#7ecfff',
-                backgroundColor: 'rgba(126,207,255,0.2)',
-                tension: 0.2,
-                pointRadius: 2,
-            }]
-        };
-        new Chart(ctx, {
-            type: 'line',
-            data: data,
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { labels: { color: '#eee' } }
-                },
-                scales: {
-                    x: { ticks: { color: '#eee' } },
-                    y: { ticks: { color: '#eee' } }
-                }
-            }
-        });
-    }
+    const chartData = {{ chart_data|tojson }};
+    const selectedFeature = "{{ selected_feature }}";
 </script>
+<script src="{{ url_for('static', filename='monitoring.js') }}"></script>
 {% endblock %}
